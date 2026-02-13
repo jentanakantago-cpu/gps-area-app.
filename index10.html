@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>แอปวัดพื้นที่ GPS</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap');
+        body { font-family: 'Kanit', sans-serif; }
+        #path-canvas { display: block; max-width: 100%; height: auto; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex items-center justify-center p-4">
+
+    <div class="bg-slate-800 p-6 rounded-3xl shadow-2xl w-full max-w-md border border-slate-700 space-y-5">
+        
+        <div class="text-center">
+            <h1 class="text-2xl font-bold text-blue-400">🛰️ วัดพื้นที่ GPS</h1>
+            <p class="text-slate-400 text-sm">แม่นยำด้วยระบบพิกัดดาวเทียม</p>
+        </div>
+
+        <div id="message-box" class="hidden p-3 rounded-xl text-center text-sm font-medium"></div>
+
+        <div class="bg-slate-700/50 p-4 rounded-2xl border border-slate-600 space-y-2">
+            <div class="flex justify-between items-center">
+                <span class="font-semibold">สถานะ:</span>
+                <span id="status-display" class="text-red-400">ปิดอยู่</span>
+            </div>
+            <div class="text-xs font-mono text-slate-400" id="coords-display">Lat: ---, Lon: ---</div>
+            <div class="text-xs text-yellow-500 font-mono" id="accuracy-display">ความคลาดเคลื่อน: ---</div>
+        </div>
+
+        <div class="relative group">
+            <canvas id="path-canvas" class="bg-slate-900 border-2 border-slate-600 rounded-2xl w-full h-48" width="400" height="300"></canvas>
+            <div class="absolute top-2 right-2 text-[10px] bg-slate-800/80 px-2 py-1 rounded text-slate-300">Preview</div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+            <button id="toggle-gps-btn" class="bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold transition-all active:scale-95">เปิด GPS</button>
+            <button id="record-btn" class="bg-emerald-600 hover:bg-emerald-500 py-3 rounded-xl font-bold disabled:opacity-30 transition-all active:scale-95" disabled>📍 บันทึกจุด</button>
+        </div>
+
+        <div class="bg-slate-700/30 rounded-2xl p-4">
+            <h2 class="text-sm font-semibold mb-2 text-slate-400">จุดที่บันทึกแล้ว: <span id="point-count" class="text-white">0</span> จุด</h2>
+            <div id="points-list-container" class="max-h-24 overflow-y-auto">
+                <ul id="points-list" class="text-[10px] font-mono space-y-1 text-slate-400"></ul>
+                <p id="points-placeholder" class="text-center text-xs text-slate-600 py-2">ยังไม่มีข้อมูล</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+            <button id="calculate-btn" class="bg-indigo-600 hover:bg-indigo-500 py-3 rounded-xl font-bold disabled:opacity-30 transition-all" disabled>📐 คำนวณ</button>
+            <button id="clear-btn" class="bg-slate-600 hover:bg-red-500 py-3 rounded-xl font-bold disabled:opacity-30 transition-all" disabled>🗑️ ล้าง</button>
+        </div>
+
+        <div id="result-display" class="bg-gradient-to-br from-blue-900/40 to-indigo-900/40 p-5 rounded-2xl border border-blue-500/30 text-center min-h-[80px] flex items-center justify-center">
+            <p class="text-slate-500 text-sm italic">กดคำนวณเพื่อแสดงผลพื้นที่</p>
+        </div>
+    </div>
+
+    <script>
+        let coords = [], currentPos = null, watchId = null;
+        const canvas = document.getElementById('path-canvas'), ctx = canvas.getContext('2d');
+
+        function updateUI() {
+            document.getElementById('record-btn').disabled = !currentPos;
+            document.getElementById('calculate-btn').disabled = coords.length < 3;
+            document.getElementById('clear-btn').disabled = coords.length === 0;
+            document.getElementById('point-count').textContent = coords.length;
+            document.getElementById('points-placeholder').classList.toggle('hidden', coords.length > 0);
+            draw();
+        }
+
+        function toggleGPS() {
+            const btn = document.getElementById('toggle-gps-btn');
+            if (watchId) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null; currentPos = null;
+                btn.textContent = 'เปิด GPS'; btn.className = btn.className.replace('bg-red-600', 'bg-blue-600');
+                document.getElementById('status-display').textContent = 'ปิดอยู่';
+                document.getElementById('status-display').className = 'text-red-400';
+            } else {
+                btn.textContent = 'กำลังหา...';
+                watchId = navigator.geolocation.watchPosition(p => {
+                    currentPos = p.coords;
+                    document.getElementById('status-display').textContent = 'ออนไลน์';
+                    document.getElementById('status-display').className = 'text-emerald-400';
+                    document.getElementById('coords-display').textContent = `Lat: ${currentPos.latitude.toFixed(6)}, Lon: ${currentPos.longitude.toFixed(6)}`;
+                    document.getElementById('accuracy-display').textContent = `คลาดเคลื่อน: ${currentPos.accuracy.toFixed(1)} ม.`;
+                    btn.textContent = 'ปิด GPS'; btn.className = btn.className.replace('bg-blue-600', 'bg-red-600');
+                    updateUI();
+                }, e => alert('กรุณาเปิด GPS'), { enableHighAccuracy: true });
+            }
+        }
+
+        function record() {
+            coords.push({ lat: currentPos.latitude, lon: currentPos.longitude });
+            const li = document.createElement('li');
+            li.textContent = `${coords.length}. ${currentPos.latitude.toFixed(5)}, ${currentPos.longitude.toFixed(5)}`;
+            document.getElementById('points-list').appendChild(li);
+            updateUI();
+        }
+
+        function toMeters(pts) {
+            if (!pts.length) return [];
+            const R = 6371000, lat0 = pts[0].lat * Math.PI / 180, lon0 = pts[0].lon * Math.PI / 180;
+            return pts.map(p => ({
+                x: (p.lon * Math.PI / 180 - lon0) * R * Math.cos(lat0),
+                y: (p.lat * Math.PI / 180 - lat0) * R
+            }));
+        }
+
+        function draw(fill = false) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const all = [...coords]; if (currentPos) all.push({lat: currentPos.latitude, lon: currentPos.longitude});
+            const pts = toMeters(all); if (!pts.length) return;
+            
+            const minX = Math.min(...pts.map(p => p.x)), maxX = Math.max(...pts.map(p => p.x));
+            const minY = Math.min(...pts.map(p => p.y)), maxY = Math.max(...pts.map(p => p.y));
+            const scale = Math.min(340/(maxX-minX||1), 240/(maxY-minY||1));
+            
+            ctx.save();
+            ctx.translate(200 - ((minX+maxX)/2)*scale, 150 + ((minY+maxY)/2)*scale);
+            ctx.beginPath();
+            pts.forEach((p, i) => i === 0 ? ctx.moveTo(p.x*scale, -p.y*scale) : ctx.lineTo(p.x*scale, -p.y*scale));
+            if (fill) { ctx.closePath(); ctx.fillStyle = 'rgba(59, 130, 246, 0.3)'; ctx.fill(); }
+            ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 2; ctx.stroke();
+            pts.forEach((p, i) => {
+                ctx.fillStyle = i < coords.length ? (i===0?'#10b981':'#fbbf24') : '#ef4444';
+                ctx.beginPath(); ctx.arc(p.x*scale, -p.y*scale, 4, 0, 7); ctx.fill();
+            });
+            ctx.restore();
+        }
+
+        function calculate() {
+            const pts = toMeters(coords);
+            let area = 0;
+            for (let i = 0; i < pts.length; i++) {
+                let j = (i + 1) % pts.length;
+                area += pts[i].x * pts[j].y - pts[j].x * pts[i].y;
+            }
+            area = Math.abs(area / 2);
+            const wa = area / 4, rai = Math.floor(wa / 400), ngan = Math.floor((wa % 400) / 100), twa = (wa % 100).toFixed(2);
+            document.getElementById('result-display').innerHTML = `
+                <div class="text-white">
+                    <div class="text-2xl font-bold text-emerald-400">${area.toFixed(2)} ม.²</div>
+                    <div class="text-sm">${rai} ไร่ ${ngan} งาน ${twa} ตร.ว.</div>
+                </div>`;
+            draw(true);
+        }
+
+        document.getElementById('toggle-gps-btn').onclick = toggleGPS;
+        document.getElementById('record-btn').onclick = record;
+        document.getElementById('calculate-btn').onclick = calculate;
+        document.getElementById('clear-btn').onclick = () => { coords = []; document.getElementById('points-list').innerHTML = ''; document.getElementById('result-display').innerHTML = '<p class="text-slate-500 text-sm italic">กดคำนวณเพื่อแสดงผลพื้นที่</p>'; updateUI(); };
+    </script>
+</body>
+</html>
