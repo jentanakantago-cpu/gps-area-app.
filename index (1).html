@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>แอปวัดพื้นที่ GPS</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Use Inter font */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Hide number spin buttons for input[type=number] */
+        input[type=number]::-webkit-inner-spin-button,
+        input[type=number]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type=number] {
+            -moz-appearance: textfield;
+        }
+        /* Ensure canvas is responsive */
+        #path-canvas {
+            display: block;
+            max-width: 100%;
+            height: auto;
+            /* Note: Actual width/height will be set dynamically, but use default size for layout */
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex items-center justify-center p-4">
+
+    <div class="bg-gray-800 p-6 rounded-2xl shadow-2xl w-full max-w-md space-y-5">
+        
+        <h1 class="text-2xl font-bold text-center text-blue-400">🛰️ แอปวัดพื้นที่ GPS</h1>
+
+        <!-- Message Box Section -->
+        <div id="message-box" class="hidden p-3 rounded-lg text-center font-medium"></div>
+
+        <!-- GPS Status Section -->
+        <div class="bg-gray-700 p-4 rounded-lg space-y-2">
+            <div class="flex justify-between items-center">
+                <span class="font-semibold text-lg">สถานะ GPS:</span>
+                <span id="status-display" class="font-mono text-gray-300">ปิดอยู่</span>
+            </div>
+            <div class="text-sm text-gray-400 font-mono" id="coords-display">
+                Lat: ---, Lon: ---
+            </div>
+            <div class="text-sm text-yellow-400 font-mono" id="accuracy-display">
+                ความแม่นยำ: ---
+            </div>
+        </div>
+
+        <!-- Path Visualization Canvas -->
+        <div class="bg-gray-700 p-4 rounded-lg">
+            <h2 class="text-xl font-semibold mb-3">แผนที่จำลองการเดิน</h2>
+            <!-- Canvas is set to a fixed ratio for drawing, styled to be full width -->
+            <canvas id="path-canvas" class="bg-gray-800 border-2 border-blue-500 rounded-lg w-full" width="400" height="300"></canvas>
+        </div>
+
+
+        <!-- Control Buttons Section -->
+        <div class="grid grid-cols-2 gap-4">
+            <button id="toggle-gps-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-all duration-200">
+                เปิด GPS
+            </button>
+            <button id="record-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                📍 บันทึกพิกัด
+            </button>
+        </div>
+
+        <!-- Coordinates List Section -->
+        <div class="space-y-3">
+            <h2 class="text-xl font-semibold">พิกัดที่บันทึก (<span id="point-count">0</span>)</h2>
+            <div id="points-list-container" class="bg-gray-700 p-4 rounded-lg max-h-40 overflow-y-auto space-y-2">
+                <ol id="points-list" class="list-decimal list-inside text-gray-300 font-mono text-sm">
+                    <!-- Coordinate list will be added here -->
+                </ol>
+                <p id="points-placeholder" class="text-gray-500 text-center">ยังไม่มีการบันทึกพิกัด</p>
+            </div>
+        </div>
+
+        <!-- Calculation Buttons Section -->
+        <div class="grid grid-cols-2 gap-4">
+            <button id="calculate-btn" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                📐 คำนวณพื้นที่
+            </button>
+            <button id="clear-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                🗑️ ล้างทั้งหมด
+            </button>
+        </div>
+
+        <!-- Results Section -->
+        <div class="space-y-3">
+            <h2 class="text-xl font-semibold">ผลการคำนวณ</h2>
+            <div id="result-display" class="bg-gray-700 p-4 rounded-lg text-center min-h-[4rem] flex items-center justify-center">
+                <p class="text-gray-500">ผลลัพธ์จะแสดงที่นี่</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Note: GPS access (Geolocation API) only works on localhost or HTTPS.
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            // Select Elements
+            const toggleGpsBtn = document.getElementById('toggle-gps-btn');
+            const recordBtn = document.getElementById('record-btn');
+            const calculateBtn = document.getElementById('calculate-btn');
+            const clearBtn = document.getElementById('clear-btn');
+            
+            const statusDisplay = document.getElementById('status-display');
+            const coordsDisplay = document.getElementById('coords-display');
+            const accuracyDisplay = document.getElementById('accuracy-display');
+            
+            const pointsList = document.getElementById('points-list');
+            const pointsPlaceholder = document.getElementById('points-placeholder');
+            const pointCount = document.getElementById('point-count');
+
+            const resultDisplay = document.getElementById('result-display');
+            const messageBox = document.getElementById('message-box');
+
+            // Canvas elements
+            const canvas = document.getElementById('path-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            // App State
+            let coordinates = []; // Stores {lat, lon}
+            let currentPosition = null;
+            let watchId = null;
+
+            // --- Main Functions ---
+
+            // Toggle GPS monitoring
+            function toggleGPS() {
+                if (watchId) {
+                    // Currently ON -> Turn OFF
+                    navigator.geolocation.clearWatch(watchId);
+                    watchId = null;
+                    currentPosition = null;
+                    
+                    toggleGpsBtn.textContent = 'เปิด GPS';
+                    toggleGpsBtn.classList.remove('bg-red-600', 'hover:bg-red-700');
+                    toggleGpsBtn.classList.add('bg-blue-600', 'hover:bg-blue-700');
+                    
+                    statusDisplay.textContent = 'ปิดอยู่';
+                    coordsDisplay.textContent = 'Lat: ---, Lon: ---';
+                    accuracyDisplay.textContent = 'ความแม่นยำ: ---';
+                    
+                    updateButtonStates();
+                } else {
+                    // Currently OFF -> Turn ON
+                    if (!navigator.geolocation) {
+                        showMessage('เบราว์เซอร์ของคุณไม่รองรับ GPS', 'error');
+                        return;
+                    }
+                    
+                    statusDisplay.textContent = 'กำลังค้นหา...';
+                    toggleGpsBtn.textContent = 'ปิด GPS';
+                    toggleGpsBtn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+                    toggleGpsBtn.classList.add('bg-red-600', 'hover:bg-red-700');
+                    
+                    const options = {
+                        enableHighAccuracy: true,
+                        timeout: 10000, // 10 seconds
+                        maximumAge: 0
+                    };
+                    
+                    watchId = navigator.geolocation.watchPosition(onGPSSuccess, onGPSError, options);
+                }
+            }
+
+            // GPS success callback
+            function onGPSSuccess(position) {
+                currentPosition = position.coords;
+                
+                statusDisplay.textContent = 'ออนไลน์';
+                coordsDisplay.textContent = `Lat: ${currentPosition.latitude.toFixed(6)}, Lon: ${currentPosition.longitude.toFixed(6)}`;
+                accuracyDisplay.textContent = `ความแม่นยำ: ${currentPosition.accuracy.toFixed(1)} เมตร`;
+                
+                updateButtonStates();
+                drawPath(); // Draw path on every update
+            }
+
+            // GPS error callback
+            function onGPSError(error) {
+                if (watchId) {
+                    navigator.geolocation.clearWatch(watchId);
+                    watchId = null;
+                }
+                currentPosition = null;
+                
+                let errorMsg = 'เกิดข้อผิดพลาด';
+                switch(error.code) {
+                    case error.PERMISSION_DENIED:
+                        errorMsg = "คุณไม่อนุญาตให้เข้าถึงตำแหน่ง";
+                        break;
+                    case error.POSITION_UNAVAILABLE:
+                        errorMsg = "ข้อมูลตำแหน่งไม่พร้อมใช้งาน";
+                        break;
+                    case error.TIMEOUT:
+                        errorMsg = "หมดเวลาในการค้นหาตำแหน่ง";
+                        break;
+                    default:
+                        errorMsg = "เกิดข้อผิดพลาดที่ไม่รู้จัก";
+                }
+                
+                console.error("GPS Error:", error.message, `(Code: ${error.code})`);
+
+                showMessage(errorMsg, 'error');
+                
+                // Reset button status
+                toggleGpsBtn.textContent = 'เปิด GPS';
+                toggleGpsBtn.classList.remove('bg-red-600', 'hover:bg-red-700');
+                toggleGpsBtn.classList.add('bg-blue-600', 'hover:bg-blue-700');
+                statusDisplay.textContent = 'ข้อผิดพลาด';
+                coordsDisplay.textContent = 'Lat: ---, Lon: ---';
+                accuracyDisplay.textContent = 'ความแม่นยำ: ---';
+                
+                updateButtonStates();
+            }
+
+            // Record current coordinate
+            function recordCoordinate() {
+                if (!currentPosition) {
+                    showMessage('กรุณาเปิด GPS และรอรับสัญญาณก่อน', 'error');
+                    return;
+                }
+                
+                const { latitude, longitude } = currentPosition;
+                coordinates.push({ lat: latitude, lon: longitude });
+                
+                // Update UI list
+                const li = document.createElement('li');
+                li.textContent = `Lat: ${latitude.toFixed(6)}, Lon: ${longitude.toFixed(6)}`;
+                pointsList.appendChild(li);
+                
+                updateButtonStates();
+                drawPath(); // Redraw path after recording a point
+                showMessage(`บันทึกจุดที่ ${coordinates.length} สำเร็จ`, 'success');
+            }
+
+            // Calculate the area
+            function calculateArea() {
+                if (coordinates.length < 3) {
+                    showMessage('ต้องมีพิกัดอย่างน้อย 3 จุดในการคำนวณพื้นที่', 'error');
+                    return;
+                }
+
+                // Recalculate meter coordinates (needed for drawing area fill)
+                const meterCoords = convertCoordsToMeters(coordinates); 
+                const areaSqMeters = calculateShoelaceArea(meterCoords);
+                const formattedArea = formatArea(areaSqMeters);
+
+                // Draw the filled area
+                drawPath(true); 
+
+                resultDisplay.innerHTML = `
+                    <div class="text-left w-full">
+                        <p class="text-lg font-bold text-green-400">${areaSqMeters.toFixed(2)} ตารางเมตร</p>
+                        <p class="text-md text-white">${formattedArea}</p>
+                    </div>
+                `;
+            }
+
+            // Clear all data
+            function clearAll() {
+                coordinates = [];
+                currentPosition = null;
+                
+                if (watchId) {
+                    toggleGPS(); // Turn off GPS if it's on
+                }
+                
+                pointsList.innerHTML = ''; // Clear list
+                resultDisplay.innerHTML = '<p class="text-gray-500">ผลลัพธ์จะแสดงที่นี่</p>';
+                
+                drawPath(); // Clear the canvas
+                updateButtonStates();
+                showMessage('ล้างข้อมูลทั้งหมดแล้ว', 'success');
+            }
+
+            // --- Calculation Helper Functions ---
+
+            // Convert (Lat, Lon) to (x, y) in meters (Flat-Earth approximation)
+            function convertCoordsToMeters(coords) {
+                if (coords.length === 0) return [];
+                const R = 6371000; // Earth's approximate radius (meters)
+                const origin = coords[0];
+                const originRad = {
+                    lat: origin.lat * Math.PI / 180,
+                    lon: origin.lon * Math.PI / 180
+                };
+                // Pre-calculate cosine of origin latitude for accurate longitudinal scaling
+                const cosLatOrigin = Math.cos(originRad.lat);
+
+                return coords.map(c => {
+                    const rad = {
+                        lat: c.lat * Math.PI / 180,
+                        lon: c.lon * Math.PI / 180
+                    };
+                    // x = (lon - lon_origin) * R * cos(lat_origin)
+                    const x = (rad.lon - originRad.lon) * R * cosLatOrigin;
+                    // y = (lat - lat_origin) * R
+                    const y = (rad.lat - originRad.lat) * R;
+                    return { x, y };
+                });
+            }
+
+            // Calculate area using the Shoelace formula
+            function calculateShoelaceArea(points) {
+                let area = 0;
+                const n = points.length;
+
+                for (let i = 0; i < n; i++) {
+                    const j = (i + 1) % n; // Next point (wraps around to 0 for the last point)
+                    area += points[i].x * points[j].y;
+                    area -= points[j].x * points[i].y;
+                }
+
+                return Math.abs(area / 2);
+            }
+
+            // Convert square meters to Thai units (Rai-Ngan-Tarangwa)
+            function formatArea(sqMeters) {
+                const RAI_SQM = 1600;
+                const NGAN_SQM = 400;
+                const WA_SQM = 4;
+
+                let rai = Math.floor(sqMeters / RAI_SQM);
+                let remainder = sqMeters % RAI_SQM;
+                
+                let ngan = Math.floor(remainder / NGAN_SQM);
+                remainder = remainder % NGAN_SQM;
+
+                let wa = remainder / WA_SQM; // Square wa can be decimal
+
+                return `${rai} ไร่ ${ngan} งาน ${wa.toFixed(2)} ตารางวา`;
+            }
+
+
+            // --- Canvas Drawing Function ---
+            
+            function drawPath(isAreaCalculated = false) {
+                // Clear the canvas
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                if (coordinates.length < 1 && !currentPosition) return;
+
+                // 1. Get all points (recorded + current position if GPS is active)
+                const allPoints = [...coordinates];
+                if (currentPosition) {
+                    allPoints.push({ lat: currentPosition.latitude, lon: currentPosition.longitude });
+                }
+
+                // 2. Convert all points to meters (x, y) relative to the first recorded point
+                const meterCoords = convertCoordsToMeters(allPoints);
+                if (meterCoords.length === 0) return;
+
+                // 3. Find bounding box (min/max x, y)
+                let minX = Infinity, minY = Infinity;
+                let maxX = -Infinity, maxY = -Infinity;
+                meterCoords.forEach(p => {
+                    minX = Math.min(minX, p.x);
+                    minY = Math.min(minY, p.y);
+                    maxX = Math.max(maxX, p.x);
+                    maxY = Math.max(maxY, p.y);
+                });
+
+                const rangeX = maxX - minX;
+                const rangeY = maxY - minY;
+                
+                // 4. Calculate scaling and offset
+                const padding = 30; // Pixel padding around the path
+                const effectiveWidth = canvas.width - 2 * padding;
+                const effectiveHeight = canvas.height - 2 * padding;
+
+                // Determine the largest scale factor to fit both dimensions
+                let scaleX = effectiveWidth / (rangeX || 1);
+                let scaleY = effectiveHeight / (rangeY || 1);
+                
+                // Use the smallest scale factor to ensure the shape fits entirely
+                const scale = Math.min(scaleX, scaleY); 
+                
+                // Calculate translation to center the path
+                const centerX = (minX + maxX) / 2;
+                const centerY = (minY + maxY) / 2;
+                
+                const canvasCenterX = canvas.width / 2;
+                const canvasCenterY = canvas.height / 2;
+
+                const translateX = canvasCenterX - (centerX * scale);
+                const translateY = canvasCenterY + (centerY * scale); // Y-axis is inverted in canvas
+
+                // 5. Drawing begins
+                ctx.save();
+                ctx.translate(translateX, translateY); // Apply translation
+                ctx.scale(scale, -scale); // Apply scale and flip Y-axis (Y increases upwards in math, downwards in canvas)
+
+                // --- Draw Area Fill (if calculated) ---
+                if (isAreaCalculated && meterCoords.length > 2) {
+                    ctx.beginPath();
+                    ctx.moveTo(meterCoords[0].x, meterCoords[0].y);
+                    for (let i = 1; i < coordinates.length; i++) {
+                        ctx.lineTo(meterCoords[i].x, meterCoords[i].y);
+                    }
+                    ctx.closePath();
+                    ctx.fillStyle = 'rgba(60, 100, 200, 0.3)'; // Semi-transparent blue fill
+                    ctx.fill();
+                }
+
+                // --- Draw Path Line ---
+                if (meterCoords.length > 1) {
+                    ctx.beginPath();
+                    ctx.moveTo(meterCoords[0].x, meterCoords[0].y);
+                    for (let i = 1; i < coordinates.length; i++) {
+                        ctx.lineTo(meterCoords[i].x, meterCoords[i].y);
+                    }
+                    // Connect last point to first if area is calculated
+                    if (isAreaCalculated && coordinates.length > 2) {
+                         ctx.lineTo(meterCoords[0].x, meterCoords[0].y);
+                    }
+                    
+                    ctx.lineWidth = 3 / scale; // Line width in meters (adjust to look good)
+                    ctx.strokeStyle = '#38bdf8'; // Sky blue line
+                    ctx.stroke();
+                }
+
+                // --- Draw Points and Current Position ---
+                meterCoords.forEach((p, index) => {
+                    const isRecorded = index < coordinates.length;
+                    
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 8 / scale, 0, Math.PI * 2); // Radius in meters
+                    
+                    if (isRecorded) {
+                        // Recorded points (Green)
+                        ctx.fillStyle = index === 0 ? '#10b981' : '#facc15'; // Start point is dark green, others yellow
+                        ctx.fill();
+                        ctx.lineWidth = 1 / scale;
+                        ctx.strokeStyle = '#1f2937';
+                        ctx.stroke();
+                    } else {
+                        // Current position (Red/Live)
+                        ctx.fillStyle = '#ef4444'; 
+                        ctx.fill();
+                    }
+                });
+
+                ctx.restore();
+            }
+
+
+            // --- UI Management Functions ---
+
+            // Update button disabled states
+            function updateButtonStates() {
+                // Record button: Enabled when GPS signal is present
+                recordBtn.disabled = !currentPosition;
+                
+                const pointCountVal = coordinates.length;
+                
+                // Calculate button: Enabled when 3+ points are recorded
+                calculateBtn.disabled = pointCountVal < 3;
+                
+                // Clear button: Enabled when 1+ points are recorded
+                clearBtn.disabled = pointCountVal === 0;
+
+                // Update point count
+                pointCount.textContent = pointCountVal;
+
+                // Show/hide placeholder
+                if (pointCountVal > 0) {
+                    pointsPlaceholder.classList.add('hidden');
+                } else {
+                    pointsPlaceholder.classList.remove('hidden');
+                }
+            }
+
+            // Show temporary message box
+            function showMessage(text, type = 'error') {
+                messageBox.textContent = text;
+                messageBox.classList.remove('hidden');
+
+                if (type === 'error') {
+                    messageBox.classList.remove('bg-green-500', 'text-green-900');
+                    messageBox.classList.add('bg-red-400', 'text-red-900');
+                } else { // 'success'
+                    messageBox.classList.remove('bg-red-400', 'text-red-900');
+                    messageBox.classList.add('bg-green-500', 'text-green-900');
+                }
+
+                // Hide message after 3 seconds
+                setTimeout(() => {
+                    messageBox.classList.add('hidden');
+                }, 3000);
+            }
+
+            // --- Event Listeners and Initialization ---
+            toggleGpsBtn.addEventListener('click', toggleGPS);
+            recordBtn.addEventListener('click', recordCoordinate);
+            calculateBtn.addEventListener('click', calculateArea);
+            clearBtn.addEventListener('click', clearAll);
+
+            // Initial button state setup
+            updateButtonStates();
+            drawPath(); // Draw empty canvas initially
+        });
+    </script>
+</body>
+</html>
